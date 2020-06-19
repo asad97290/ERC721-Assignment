@@ -1,0 +1,113 @@
+pragma solidity ^0.6.0;
+pragma experimental ABIEncoderV2; // helps in returning complex data types (i.e structs and array) in functions
+
+import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/token/ERC721/ERC721.sol";
+
+contract RealEstateToken is ERC721{
+    
+    uint256 internal tokenIdCounter; 
+    uint256 internal buyerID;
+    
+    enum offers_status{pending,approved,rejected}
+
+    struct buyers_info{
+        uint id;
+        address buyer_address;
+        uint buyer_offer;
+        offers_status buyer_offer_status;
+    }
+    
+     struct property_info{
+        uint id;
+        string property_address;
+        uint price;
+        bool isOnSale;
+        address property_owner_address;
+    }
+    
+    mapping(address => property_info) public property_details;
+    mapping(uint256 => address) public property_addresses;
+    mapping(address=>buyers_info) public list_of_buyers;
+    mapping(uint256 => buyers_info[]) public buyer_array;
+    
+    constructor() public ERC721("ReatEstatToken","RT"){}
+    
+    modifier only_property_owner(){
+        require(property_details[msg.sender].property_owner_address == msg.sender,"only owner of the property has the authority to execute this function");
+        _;
+    }
+    
+    function registerProperty(string memory _property_address,uint256 _property_price, string memory _tokenUri) public {
+        tokenIdCounter = tokenIdCounter.add(1);
+        _mint(msg.sender,tokenIdCounter);
+        _setTokenURI(tokenIdCounter,_tokenUri);
+        
+        property_info memory property_data;
+        property_data = property_info({
+            id:tokenIdCounter,
+            property_address:_property_address,
+            price:_property_price,
+            isOnSale:false,
+            property_owner_address:msg.sender       
+        });
+        property_details[msg.sender] = property_data;
+        property_addresses[tokenIdCounter] = msg.sender;
+    }
+    
+    function enable_property_forSale(uint _tokenId) public only_property_owner{
+        require(_exists(_tokenId),"invalid token id");
+        property_details[property_addresses[_tokenId]].isOnSale = true;
+    }
+    
+    function request_buy(uint _tokenId,uint offer_price) public{
+        require(_exists(_tokenId),"invalid token id");
+        require(property_details[property_addresses[_tokenId]].isOnSale,"this property is not on sale");
+        buyerID = buyerID.add(1);
+        buyers_info memory buyer_data;
+        buyer_data = buyers_info({
+            id : buyerID,
+            buyer_address : msg.sender,
+            buyer_offer : offer_price,
+            buyer_offer_status : offers_status.pending
+        });
+        buyer_array[_tokenId].push(buyer_data);
+        list_of_buyers[msg.sender] = buyer_data;
+        list_of_buyers[msg.sender].buyer_offer_status = offers_status.pending;
+    }
+    
+    function check_offers(uint _tokenId) only_property_owner public view returns(buyers_info[] memory){
+        require(_exists(_tokenId),"invalid token id");
+        return buyer_array[_tokenId];
+    }
+    
+    function accept_offer(address _buyer_address,uint _tokenId) only_property_owner public{
+        require(_exists(_tokenId),"invalid token id");  
+        require(list_of_buyers[_buyer_address].buyer_address == _buyer_address,"invalid buyer address");
+        list_of_buyers[_buyer_address].buyer_offer_status = offers_status.approved;    
+    }
+    
+    function reject_offer(address _buyer_address,uint _tokenId) public only_property_owner{
+        require(_exists(_tokenId),"invalid token id");  
+        require(list_of_buyers[_buyer_address].buyer_address == _buyer_address,"invalid buyer address");
+        list_of_buyers[_buyer_address].buyer_offer_status = offers_status.rejected;    
+    }
+    
+    
+    function buy_property(uint256 _tokenId) payable public{
+        require(_exists(_tokenId),"invalid token id");
+        require(list_of_buyers[msg.sender].buyer_address == msg.sender,"you haven't submit request to buy this property");
+        require(list_of_buyers[msg.sender].buyer_offer_status == offers_status.approved,"your offer is not approved by property owner");
+        require(msg.value > 0 , "value field is empty");
+        //                                                  1 eth = 10**18 wei
+        uint256 price = list_of_buyers[msg.sender].buyer_offer.mul(1*10**18); 
+        require(price == msg.value,"the price you entered does't match with your approved offer");
+        address owner = property_details[property_addresses[_tokenId]].property_owner_address;
+        _transfer(owner,msg.sender,_tokenId);
+        emit Transfer(owner,msg.sender,_tokenId);
+    }
+    
+    function checkPropertyPrice(uint256 _tokenId) view public returns(uint256){
+        require(_exists(_tokenId),"invalid token id");
+        return property_details[property_addresses[_tokenId]].price;
+    }
+}
